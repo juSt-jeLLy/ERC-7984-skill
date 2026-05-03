@@ -1,0 +1,290 @@
+---
+description: >
+  Activate for any FHEVM, Zama Protocol, or confidential smart contract task.
+  Covers encrypted types, FHE operations, ACL, input proofs, decryption, frontend,
+  testing, deployment, ERC-7984 tokens, and the full fhevm-contracts v0.2.4 library.
+globs:
+  - "**/*.sol"
+  - "**/hardhat.config.*"
+  - "**/test/**/*.ts"
+  - "**/scripts/**/*.ts"
+  - "**/deploy/**/*.ts"
+alwaysApply: false
+---
+
+# Zama FHEVM Cursor Rule
+
+For full workflow, see [SKILL.md](../../SKILL.md).
+For errors and fixes, see [error-reference.md](../../references/error-reference.md).
+For fhevm-contracts full API, see [oz-confidential.md](../../references/oz-confidential.md).
+
+## Activation
+
+Apply this rule when working with:
+- FHEVM, Zama Protocol, confidential smart contracts
+- `euint64`, `ebool`, `eaddress`, `externalEuint64`, `einput`, or similar encrypted types
+- `FHE.add`, `FHE.select`, `FHE.fromExternal`, `FHE.allowThis`, `FHE.allow`
+- `TFHE.add`, `TFHE.select`, `TFHE.asEuint64`, `TFHE.allowThis`, `TFHE.allow`
+- `@fhevm/hardhat-plugin`, `@zama-fhe/relayer-sdk`, `fhevmjs`
+- `ConfidentialERC20`, `ConfidentialERC20Votes`, `EncryptedErrors`, `ERC-7984`, `fhevm-contracts`
+
+---
+
+## Package Versions (Verified 2026-05-02)
+
+| Package | Version |
+|---|---|
+| `@fhevm/solidity` | **0.11.1** |
+| `@fhevm/hardhat-plugin` | **0.4.2** |
+| `@fhevm/mock-utils` | **0.4.2** (install separately — peer dep of hardhat-plugin) |
+| `@zama-fhe/relayer-sdk` | **0.4.1–0.4.2** |
+| `fhevm-contracts` | **0.2.4** |
+| `fhevm` (used by fhevm-contracts) | **^0.6.2** |
+
+---
+
+## Two Package Families — Pick the Right One
+
+**Do not mix.** Wrong namespace or config class = compile error or silent wrong-network routing.
+
+| | Standalone (`@fhevm/solidity`) | `fhevm-contracts` extension |
+|---|---|---|
+| Namespace | `FHE` | `TFHE` |
+| Input type | `externalEuint64` | `einput` |
+| Verify input | `FHE.fromExternal(enc, proof)` | `TFHE.asEuint64(enc, proof)` |
+| ACL | `FHE.allowThis` / `FHE.allow` | `TFHE.allowThis` / `TFHE.allow` |
+| Sepolia config (upcoming) | `SepoliaFHEVMConfig` | `SepoliaZamaFHEVMConfig` |
+| Sepolia import (upcoming) | `@fhevm/solidity/config/FHEVMConfig.sol` | `fhevm/config/ZamaFHEVMConfig.sol` |
+| Mainnet config (v0.11.1) | `ZamaEthereumConfig` | — |
+| Mainnet import (v0.11.1) | `@fhevm/solidity/config/ZamaConfig.sol` | — |
+
+> **v0.11.1 note:** The published npm package (`@fhevm/solidity@0.11.1`) may use `ZamaConfig.sol` instead of `FHEVMConfig.sol`. Run `ls node_modules/@fhevm/solidity/config/` to see which files exist in your installed version.
+
+---
+
+## Standalone Contract Defaults (`@fhevm/solidity`)
+
+```solidity
+import { FHE, euint64, externalEuint64, ebool } from "@fhevm/solidity";
+// For Sepolia (upcoming main branch): import { SepoliaFHEVMConfig } from "@fhevm/solidity/config/FHEVMConfig.sol";
+// For mainnet (v0.11.1):              import { ZamaEthereumConfig }  from "@fhevm/solidity/config/ZamaConfig.sol";
+// For local Hardhat: no import — plugin auto-configures
+
+contract MyVault /* is SepoliaFHEVMConfig for Sepolia */ {
+    mapping(address => euint64) private _balances;
+
+    // External inputs: always externalEuint64 + bytes proof → FHE.fromExternal
+    function deposit(externalEuint64 encAmount, bytes calldata proof) external {
+        euint64 amount = FHE.fromExternal(encAmount, proof);  // ← verify ZK proof first
+        if (!FHE.isInitialized(_balances[msg.sender])) {     // ← FHE.isInitialized, not unwrap
+            _balances[msg.sender] = FHE.asEuint64(0);
+            FHE.allowThis(_balances[msg.sender]);
+            FHE.allow(_balances[msg.sender], msg.sender);
+        }
+        _balances[msg.sender] = FHE.add(_balances[msg.sender], amount);
+        FHE.allowThis(_balances[msg.sender]);          // ← REQUIRED after every assignment
+        FHE.allow(_balances[msg.sender], msg.sender); // ← REQUIRED for user to re-encrypt
+    }
+
+    // Never branch on ebool — use FHE.select:
+    function transfer(address to, euint64 amount) internal {
+        ebool hasEnough = FHE.gte(_balances[msg.sender], amount);
+        euint64 actual = FHE.select(hasEnough, amount, FHE.asEuint64(0)); // ✅
+        // NOT: if (hasEnough) { ... }                                     // ❌ leaks branch
+        _balances[msg.sender] = FHE.sub(_balances[msg.sender], actual);
+        _balances[to] = FHE.add(_balances[to], actual);
+        FHE.allowThis(_balances[msg.sender]); FHE.allow(_balances[msg.sender], msg.sender);
+        FHE.allowThis(_balances[to]);         FHE.allow(_balances[to], to);
+    }
+
+    // View returns handle — caller re-encrypts off-chain (never returns plaintext):
+    function balanceOf(address user) external view returns (euint64) {
+        return _balances[user];
+    }
+}
+```
+
+**Network configs (standalone):**
+```solidity
+// Local Hardhat (plugin auto-configures — no class needed):
+contract MyToken { }
+
+// Sepolia testnet (upcoming @fhevm/solidity main branch):
+import { SepoliaFHEVMConfig } from "@fhevm/solidity/config/FHEVMConfig.sol";
+contract MyToken is SepoliaFHEVMConfig { }
+
+// Ethereum mainnet (current @fhevm/solidity v0.11.1):
+import { ZamaEthereumConfig } from "@fhevm/solidity/config/ZamaConfig.sol";
+contract MyToken is ZamaEthereumConfig { }
+```
+
+### `FHE.isInitialized` — Use This, Not `unwrap`
+
+```solidity
+// ✅ CORRECT — works for all encrypted types (euint8–256, ebool, eaddress)
+if (!FHE.isInitialized(_balances[user])) {
+    _balances[user] = FHE.asEuint64(0);
+    FHE.allowThis(_balances[user]);
+    FHE.allow(_balances[user], user);
+}
+
+// ❌ AVOID — fragile, breaks on ebool; FHE.isInitialized is the official API
+if (euint64.unwrap(_balances[user]) == 0) { ... }
+```
+
+---
+
+## fhevm-contracts Extension Defaults
+
+```solidity
+import "fhevm/lib/TFHE.sol";
+import { SepoliaZamaFHEVMConfig } from "fhevm/config/ZamaFHEVMConfig.sol";
+import { ConfidentialERC20Mintable } from
+    "fhevm-contracts/contracts/token/ERC20/extensions/ConfidentialERC20Mintable.sol";
+
+contract MyToken is SepoliaZamaFHEVMConfig, ConfidentialERC20Mintable {
+    constructor(address owner)
+        ConfidentialERC20Mintable("MyToken", "MTK", owner)
+    {
+        _unsafeMint(owner, 1_000_000); // address first, amount second; 1 MTK (decimals=6)
+        _totalSupply = 1_000_000;      // REQUIRED — _unsafeMint does NOT update totalSupply
+    }
+}
+
+// If you need to override transfer logic, override _transferNoEvent (NOT _update):
+contract MyTokenWithFee is SepoliaZamaFHEVMConfig, ConfidentialERC20Mintable {
+    function _transferNoEvent(
+        address from, address to, euint64 amount, ebool isTransferable
+    ) internal virtual override {
+        super._transferNoEvent(from, to, amount, isTransferable); // call parent first
+        // Add custom logic with TFHE (not FHE):
+        euint64 fee = TFHE.div(TFHE.mul(amount, 50), 10_000);
+        _feePool = TFHE.add(_feePool, fee);
+        TFHE.allowThis(_feePool);                 // ← REQUIRED after every TFHE assignment
+        TFHE.allow(_feePool, _feeRecipient);      // ← REQUIRED for recipient access
+    }
+}
+```
+
+**Key fhevm-contracts facts:**
+- `decimals()` → `6` (override if needed)
+- `totalSupply()` → plaintext `uint64` (update manually: `_totalSupply += amount`)
+- Transfer events use `_PLACEHOLDER = type(uint256).max` — not real amounts
+- `_unsafeMint(address to, uint64 amount)` — address first, amount second; no overflow check
+
+---
+
+## Public Decryption Pattern (standalone)
+
+```solidity
+// Mark handle as publicly decryptable:
+FHE.makePubliclyDecryptable(_result);
+
+// Callback (exact signature required):
+function onReveal(uint256 reqId, bytes memory ct, bytes memory sigs) public returns (bool) {
+    require(msg.sender == address(FHE.getDecryptionOracle()), "Only oracle");
+    FHE.checkSignatures(reqId, ct, sigs);
+    uint64 value = abi.decode(ct, (uint64));
+    emit ResultRevealed(value);
+    return true;
+}
+```
+
+---
+
+## Hardhat Config Requirements
+
+```typescript
+import "@fhevm/hardhat-plugin"; // ← MUST be first import — always
+// ...
+solidity: {
+    version: "0.8.27",
+    settings: { evmVersion: "cancun", optimizer: { enabled: true, runs: 800 } }
+}
+```
+
+**Install deps:**
+```bash
+npm install @fhevm/solidity
+npm install --save-dev @fhevm/hardhat-plugin @fhevm/mock-utils  # mock-utils required peer
+npm install @zama-fhe/relayer-sdk
+```
+
+---
+
+## Test Pattern
+
+```typescript
+// ✅ CORRECT: named import from "hardhat" — NOT `import hre from "hardhat"`
+import { ethers, fhevm } from "hardhat";
+import { FhevmType } from "@fhevm/hardhat-plugin";
+
+beforeEach(async function () {
+    // Gate to local mock only (remove for Sepolia-compatible tests):
+    if (!fhevm.isMock) { this.skip(); }
+});
+
+// Encrypt and send — fluent chain, all awaited together:
+const encrypted = await fhevm
+    .createEncryptedInput(contractAddr, signer.address)
+    .add64(1_000_000n)   // use add8/add16/add32/add64/addBool to match Solidity type
+    .encrypt();
+// encrypted.handles[0]  — Uint8Array handle (index matches addXX call order)
+// encrypted.inputProof  — ZK proof binding all handles to (contract, signer)
+await contract.deposit(encrypted.handles[0], encrypted.inputProof);
+
+// Decrypt (only works if FHE.allow(handle, signer) was called in the contract):
+const handle = await contract.balanceOf(signer.address);
+const value = await fhevm.userDecryptEuint(
+    FhevmType.euint64,   // must match actual encrypted type
+    handle,
+    contractAddr,
+    signer               // MUST match who has FHE.allow — wrong signer returns 0n silently
+);
+
+// Multi-value batch (one proof, multiple handles):
+const batch = await fhevm
+    .createEncryptedInput(contractAddr, signer.address)
+    .add64(1000n)   // handles[0]
+    .add32(50)      // handles[1]
+    .encrypt();
+```
+
+**`fhevm.isMock`** — `true` on local Hardhat, `false` on Sepolia/mainnet. Use to skip or branch:
+```typescript
+if (!fhevm.isMock) { this.skip(); }  // local-only test
+if (fhevm.isMock)  { this.skip(); }  // Sepolia-only test
+```
+
+---
+
+## Common Mistakes Quick-Reference
+
+| Mistake | Fix |
+|---|---|
+| `import hre from "hardhat"; hre.fhevm.xxx` | `import { fhevm } from "hardhat"` |
+| `input.add64(n); const r = input.encrypt()` (split) | Fluent chain: `.add64(n).encrypt()` |
+| `if (ebool) { ... }` | `FHE.select(cond, a, b)` |
+| `euint64.unwrap(x) == 0` for init check | `!FHE.isInitialized(x)` |
+| `einput` in standalone contract | `externalEuint64` + `bytes proof` |
+| Missing `FHE.allowThis` after assignment | Add immediately after every `euintXX =` |
+| Hardcoded ACL/KMS address | Inherit `SepoliaFHEVMConfig` or `ZamaEthereumConfig` |
+| `@fhevm/hardhat-plugin` not first import | Move it to first line of `hardhat.config.ts` |
+| `@fhevm/mock-utils` not installed | `npm install --save-dev @fhevm/mock-utils` |
+
+---
+
+## Reference Files
+
+- Full workflow + defaults: [SKILL.md](../../SKILL.md)
+- fhevm-contracts (all 11 contracts): [oz-confidential.md](../../references/oz-confidential.md)
+- Solidity patterns: [solidity-patterns.md](../../references/solidity-patterns.md)
+- All encrypted types: [encrypted-types.md](../../references/encrypted-types.md)
+- Access control (allowThis, allow, allowTransient): [access-control.md](../../references/access-control.md)
+- Input proofs: [input-proofs.md](../../references/input-proofs.md)
+- Decryption (user + public): [decryption.md](../../references/decryption.md)
+- Frontend (@zama-fhe/relayer-sdk): [frontend-integration.md](../../references/frontend-integration.md)
+- Testing: [testing.md](../../references/testing.md)
+- 50+ errors with fixes: [error-reference.md](../../references/error-reference.md)
+- 20 anti-patterns: [anti-patterns.md](../../references/anti-patterns.md)
+- Network addresses + package versions: [addresses.md](../../references/addresses.md)

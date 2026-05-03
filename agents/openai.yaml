@@ -1,0 +1,93 @@
+schema_version: v1
+name: zama-fhevm-skill
+display_name: Zama FHEVM Confidential Contracts
+description: >
+  Build, test, deploy, and integrate confidential smart contracts on the Zama Protocol (FHEVM).
+  Covers two active package families: standalone @fhevm/solidity (FHE namespace, externalEuint64)
+  and fhevm-contracts v0.2.4 (TFHE namespace, einput, all 11 contracts with ground-truth API).
+  Includes encrypted Solidity types, FHE operations, ACL, input proofs, user and public
+  decryption, frontend relayer integration, Hardhat testing, deployment, complete ERC-7984
+  token reference (ConfidentialERC20 through ConfidentialGovernorAlpha and ConfidentialVestingWallet),
+  EncryptedErrors utility, 50+ error fixes, and 20 documented anti-patterns with corrections.
+version: "2.1.0"
+author: zama-fhevm-skill
+category: blockchain
+tags:
+  - fhevm
+  - zama
+  - solidity
+  - confidential-smart-contracts
+  - fhevm-contracts
+  - erc7984
+  - hardhat
+  - blockchain
+  - web3
+  - encrypted-erc20
+  - governance
+entry_point: SKILL.md
+adapters:
+  agents_md: AGENTS.md
+  cursor: .cursor/rules/zama-fhevm.mdc
+package_families:
+  standalone:
+    package: "@fhevm/solidity"
+    namespace: FHE
+    input_type: externalEuint64
+    config_class: SepoliaFHEVMConfig
+    config_import: "@fhevm/solidity/config/FHEVMConfig.sol"
+  fhevm_contracts:
+    package: fhevm-contracts
+    version: "0.2.4"
+    core_dep: "fhevm ^0.6.2"
+    namespace: TFHE
+    input_type: einput
+    config_class: SepoliaZamaFHEVMConfig
+    config_import: "fhevm/config/ZamaFHEVMConfig.sol"
+    contracts:
+      - ConfidentialERC20
+      - ConfidentialERC20Mintable
+      - ConfidentialERC20WithErrors
+      - ConfidentialERC20WithErrorsMintable
+      - ConfidentialERC20Wrapped
+      - ConfidentialWETH
+      - ConfidentialERC20Votes
+      - ConfidentialGovernorAlpha
+      - ConfidentialVestingWallet
+      - ConfidentialVestingWalletCliff
+      - EncryptedErrors
+references:
+  - references/architecture.md
+  - references/setup.md
+  - references/solidity-patterns.md
+  - references/encrypted-types.md
+  - references/fhe-operations.md
+  - references/access-control.md
+  - references/input-proofs.md
+  - references/decryption.md
+  - references/frontend-integration.md
+  - references/testing.md
+  - references/deployment.md
+  - references/oz-confidential.md
+  - references/error-reference.md
+  - references/anti-patterns.md
+  - references/addresses.md
+  - references/validation.md
+  - references/distribution.md
+examples:
+  - examples/hardhat.config.ts
+  - examples/ConfidentialCounter.sol
+  - examples/ConfidentialToken.sol
+  - examples/ConfidentialTokenFhevmContracts.sol
+  - examples/ConfidentialVoting.sol
+  - examples/ConfidentialAuction.sol
+  - examples/frontend-integration.tsx
+  - examples/test-example.ts
+protocol_baseline: "Zama docs verified 2026-05-02"
+package_versions:
+  fhevm_solidity_npm: "0.11.1"
+  fhevm_hardhat_plugin: "0.4.2"
+  fhevm_mock_utils: "0.4.2"
+  relayer_sdk: "0.4.1"
+  fhevm_contracts: "0.2.4"
+  fhevm_core_used_by_contracts: "^0.6.2"
+  fhevm_protocol_github_tag: "0.12.2"
